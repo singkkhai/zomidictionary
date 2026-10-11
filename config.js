@@ -1,4 +1,2 @@
-// Paste the PUBLIC responder link from your Google Form between the quotes.
-// Example: https://docs.google.com/forms/d/e/.../viewform
-// Leave blank until your form is ready; no submissions are collected by this website.
-window.ZOMI_CONTRIBUTE_FORM_URL = "";
+// Public Google Forms responder link. Submissions are reviewed before publication.
+window.ZOMI_CONTRIBUTE_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLSc1OMENfn48CQvFVHzHLd7V-z6pbcpCWxDrd_cEhC8fu5ojDg/viewform";
