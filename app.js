@@ -1,38 +1,17 @@
-"use strict";
-let entries=[];
-let approvedEntries=[];
-const query=document.getElementById('query'),count=document.getElementById('count'),results=document.getElementById('results');
-const norm=s=>String(s||'').toLocaleLowerCase().trim();
-function draw(){
- const q=norm(query.value);results.replaceChildren();
- const all=[...approvedEntries,...entries];
- const matches=q?all.filter(x=>norm(x.zomi).includes(q)||norm(x.english).includes(q)):all.slice(0,30);
- count.textContent=`${matches.length} ${q?'matching':'shown'} research ${matches.length===1?'entry':'entries'} · ${entries.length} unverified candidates + ${approvedEntries.length} approved`;
- if(!matches.length){const p=document.createElement('p');p.textContent='No research entry matches your search.';results.append(p);return;}
- for(const x of matches.slice(0,100)){
-  const article=document.createElement('article');article.className='entry';
-  const title=document.createElement('h3');title.textContent=x.zomi;
-  const meaning=document.createElement('p');meaning.textContent=x.english;
-  const badge=document.createElement('span');badge.className=x.status==='approved'?'tag approved':'tag unverified';badge.textContent=x.status==='approved'?'Administrator approved':'Unverified research candidate';
-  article.append(title,meaning,badge);
-  if(x.source && /^https:\/\//.test(x.source)){const p=document.createElement('p');p.className='source';const a=document.createElement('a');a.href=x.source;a.target='_blank';a.rel='noopener noreferrer';a.textContent='Candidate source (not verification)';p.append(a);article.append(p);}
-  results.append(article);
- }
- if(matches.length>100){const p=document.createElement('p');p.textContent='Showing first 100 matches. Refine your search to narrow results.';results.append(p);}
-}
-fetch('./candidates.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('Load failed');return r.json()}).then(data=>{
- if(!Array.isArray(data))throw Error('Invalid format');
- entries=data.filter(x=>x&&typeof x.zomi==='string'&&typeof x.english==='string'&&x.zomi.trim()&&x.english.trim()).map(x=>({...x,status:'unverified'}));draw();
- fetch('./approved.json',{cache:'no-store'}).then(r=>r.ok?r.json():[]).then(rows=>{if(Array.isArray(rows)){approvedEntries=rows.filter(x=>x&&x.status==='approved'&&typeof x.zomi==='string'&&x.zomi.trim()&&typeof x.english==='string'&&x.english.trim());draw();}}).catch(()=>{});
-}).catch(()=>{count.textContent='Dictionary temporarily unavailable';results.textContent='Please try again later.'});
-query.addEventListener('input',draw);
-
-(function(){
- const link=document.getElementById('contribute-link');
- const status=document.getElementById('contribute-status');
- const url=String(window.ZOMI_CONTRIBUTE_FORM_URL||'').trim();
- let valid=false;
- try{const u=new URL(url);valid=u.protocol==='https:' && (u.hostname==='docs.google.com'||u.hostname==='forms.gle') && (u.hostname==='forms.gle'||u.pathname.includes('/forms/'));}catch(e){}
- if(valid){link.href=url;link.target='_blank';link.rel='noopener noreferrer';link.removeAttribute('aria-disabled');link.textContent='Contribute a word ↗';status.textContent='Submissions are privately reviewed by the administrator before publication.';}
- else{link.addEventListener('click',e=>e.preventDefault());}
-})();
+'use strict';
+const $=id=>document.getElementById(id), norm=s=>String(s??'').normalize('NFC').toLocaleLowerCase().trim();
+const state={candidates:[],approved:[],mode:'all',savedOnly:false,letter:'',limit:24,saved:new Set()};
+try{const v=JSON.parse(localStorage.getItem('zomi-saved-v3')||'[]');if(Array.isArray(v))state.saved=new Set(v.filter(x=>typeof x==='string').slice(0,5000));}catch{}
+const key=x=>norm(x.zomi)+'|'+norm(x.english);
+const entries=()=>{const approvedKeys=new Set(state.approved.map(key));return [...state.approved,...state.candidates.filter(x=>!approvedKeys.has(key(x)))];};
+function matches(x,q){const a=norm(x.zomi),b=norm(x.english);if(state.letter){const v=state.mode==='english'?b:a;if(!v.startsWith(state.letter.toLowerCase()))return false;}if(state.savedOnly&&!state.saved.has(key(x)))return false;if(!q)return true;const v=state.mode==='english'?b:state.mode==='zomi'?a:a+' '+b;return v.includes(q);}
+function rank(x,q){if(!q)return 0;const a=norm(x.zomi),b=norm(x.english);const targets=state.mode==='english'?[b]:state.mode==='zomi'?[a]:[a,b];return Math.min(...targets.map(v=>v===q?0:v.startsWith(q)?1:v.split(/[\s;,/()]+/).includes(q)?2:3));}
+function el(tag,cls,txt){const n=document.createElement(tag);if(cls)n.className=cls;if(txt!==undefined)n.textContent=txt;return n;}
+function saveState(){try{localStorage.setItem('zomi-saved-v3',JSON.stringify([...state.saved]));}catch{} $('saved-count').textContent=state.saved.size;}
+function draw(){const q=norm($('query').value);const all=entries();const found=all.filter(x=>matches(x,q));if(q)found.sort((a,b)=>rank(a,q)-rank(b,q)||a.zomi.localeCompare(b.zomi));else found.sort((a,b)=>(state.mode==='english'?a.english:a.zomi).localeCompare(state.mode==='english'?b.english:b.zomi));$('count').textContent=`${found.length.toLocaleString()} ${found.length===1?'entry':'entries'} found · ${state.candidates.length.toLocaleString()} research candidates · ${state.approved.length} approved`;$('hero-total').textContent=state.candidates.length.toLocaleString();$('results-title').textContent=state.savedOnly?'Your saved words':q?`Results for “${$('query').value.trim()}”`:state.letter?`Words beginning with ${state.letter}`:'Explore words';$('results-subtitle').textContent=q?'Exact and beginning-of-word matches appear first':'Browse and discover at your own pace';const root=$('results');root.replaceChildren();if(!found.length){const box=el('div','empty');box.append(el('strong','',state.savedOnly?'No saved words yet':'No matching words found'),el('p','',state.savedOnly?'Tap the heart on a word card to save it.':'Try a shorter search or contribute a missing word.'));root.append(box);}for(const x of found.slice(0,state.limit)){const article=el('article','entry');const top=el('div','entry-top');top.append(el('span','entry-type',x.status==='approved'?'REVIEWED ENTRY':'RESEARCH ENTRY'));const actions=el('div','entry-actions');const heart=el('button','icon-button',state.saved.has(key(x))?'♥':'♡');heart.type='button';heart.title=state.saved.has(key(x))?'Remove saved word':'Save word';heart.setAttribute('aria-label',heart.title);heart.addEventListener('click',()=>{if(state.saved.has(key(x)))state.saved.delete(key(x));else state.saved.add(key(x));saveState();draw();});const copy=el('button','icon-button','⧉');copy.type='button';copy.title='Copy word and meaning';copy.setAttribute('aria-label',copy.title);copy.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(`${x.zomi} — ${x.english}\nZomi Dictionary (research candidate; unverified)`);copy.textContent='✓';setTimeout(()=>copy.textContent='⧉',1400);}catch{copy.title='Copy unavailable in this browser';}});actions.append(heart,copy);top.append(actions);article.append(top,el('h4','',state.mode==='english'?x.english:x.zomi),el('div','meaning-label',state.mode==='english'?'TEDIM ZOMI':'ENGLISH MEANING'),el('p','meaning',state.mode==='english'?x.zomi:x.english));const foot=el('div','entry-foot');foot.append(el('span',x.status==='approved'?'tag approved':'tag',x.status==='approved'?'✓ Administrator approved':'◌ Unverified candidate'));if(typeof x.source==='string'&&/^https:\/\//.test(x.source)){const a=el('a','source-link','Source ↗');a.href=x.source;a.target='_blank';a.rel='noopener noreferrer nofollow';foot.append(a);}article.append(foot);root.append(article);}$('more').hidden=found.length<=state.limit;$('more').textContent=`Show more words ↓ (${Math.min(found.length-state.limit,24)} next)`;}
+for(const b of document.querySelectorAll('[data-mode]'))b.addEventListener('click',()=>{state.mode=b.dataset.mode;state.letter='';state.limit=24;for(const c of document.querySelectorAll('[data-mode]')){const yes=c===b;c.classList.toggle('active',yes);c.setAttribute('aria-pressed',String(yes));}buildAlphabet();draw();});
+function buildAlphabet(){const root=$('alphabet');root.replaceChildren();for(const letter of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'){const b=el('button',state.letter===letter?'active':'',letter);b.type='button';b.setAttribute('aria-label','Browse '+letter);b.addEventListener('click',()=>{state.letter=state.letter===letter?'':letter;state.limit=24;$('query').value='';buildAlphabet();draw();});root.append(b);}}
+$('query').addEventListener('input',()=>{state.letter='';state.limit=24;buildAlphabet();draw();});$('clear').addEventListener('click',()=>{$('query').value='';state.letter='';state.limit=24;buildAlphabet();draw();$('query').focus();});$('saved-toggle').addEventListener('click',()=>{state.savedOnly=!state.savedOnly;$('saved-toggle').setAttribute('aria-pressed',String(state.savedOnly));state.limit=24;draw();});$('more').addEventListener('click',()=>{state.limit+=24;draw();});$('random').addEventListener('click',()=>{const all=entries();if(!all.length)return;const x=all[Math.floor(Math.random()*all.length)];state.savedOnly=false;$('saved-toggle').setAttribute('aria-pressed','false');state.letter='';state.limit=24;$('query').value=x.zomi;buildAlphabet();draw();});
+async function load(){try{const [c,a]=await Promise.all([fetch('./candidates.json',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error('Candidate data missing');return r.json()}),fetch('./approved.json',{cache:'no-store'}).then(r=>r.ok?r.json():[]).catch(()=>[])]);if(!Array.isArray(c))throw Error('Invalid data');state.candidates=c.filter(x=>x&&typeof x.zomi==='string'&&x.zomi.trim()&&typeof x.english==='string'&&x.english.trim()).map(x=>({...x,status:'unverified'}));state.approved=Array.isArray(a)?a.filter(x=>x&&x.status==='approved'&&typeof x.zomi==='string'&&x.zomi.trim()&&typeof x.english==='string'&&x.english.trim()):[];draw();}catch(e){$('count').textContent='Unable to load dictionary entries';$('results').replaceChildren(el('p','empty','The dictionary data could not be loaded. Check candidates.json in the published GitHub Pages branch.'));}}
+function setupForm(){const link=$('contribute-link'),status=$('contribute-status'),url=String(window.ZOMI_CONTRIBUTE_FORM_URL||'').trim();let valid=false;try{const u=new URL(url);valid=u.protocol==='https:'&&(u.hostname==='forms.gle'||u.hostname==='docs.google.com'&&u.pathname.includes('/forms/'));}catch{}if(valid){link.href=url;link.target='_blank';link.rel='noopener noreferrer';link.removeAttribute('aria-disabled');link.classList.remove('disabled-link');link.textContent='Contribute a word ↗';status.textContent='Your suggestion goes to the administrator for review before publication.';}else link.addEventListener('click',e=>e.preventDefault());}
+saveState();buildAlphabet();setupForm();load();
